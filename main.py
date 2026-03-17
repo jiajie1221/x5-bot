@@ -108,28 +108,26 @@ def test_connection():
 def get_next_market(asset, duration=5):
     """
     获取当前或下一个5分钟市场
-    使用 Gamma API 查询（公共数据，无需认证）
-    资产命名：BTC 用 "bitcoin-5m"，ETH 用 "ethereum-5m"
+    使用 Gamma API 查询（官方推荐，无需认证）
     """
     try:
+        # 当前时间窗口
         now = int(time.time())
         current_window = (now // 300) * 300
         window_time = time.strftime('%Y-%m-%dT%H:%M', time.gmtime(current_window))
         
-        # Polymarket 使用的资产命名
+        # 资产名称映射：官方用的是全称
         asset_map = {
             "BTC": "bitcoin",
             "ETH": "ethereum"
         }
         asset_name = asset_map.get(asset, asset.lower())
         
-        # 构造 slug 格式：asset-5m-时间Z
-        # 例如：bitcoin-5m-2026-03-17T11:00Z
+        # 构造官方slug格式
         slug = f"{asset_name}-{duration}m-{window_time}Z"
-        
         print(f"🔍 查找市场: {slug}")
         
-        # 使用 Gamma API 查询（公共数据）
+        # Gamma API 查询（官方文档明确支持slug参数）
         gamma_url = "https://gamma-api.polymarket.com/markets"
         resp = requests.get(gamma_url, params={"slug": slug})
         
@@ -137,25 +135,26 @@ def get_next_market(asset, duration=5):
             markets = resp.json()
             if markets and len(markets) > 0:
                 market = markets[0]
-                print(f"✅ 找到市场: {market.get('question')}")
+                print(f"✅ 找到市场: {market.get('slug')}")
+                print(f"   - 问题: {market.get('question')}")
                 print(f"   - 条件ID: {market.get('conditionId')}")
-                print(f"   - 代币ID: {[t.get('id') for t in market.get('tokens', [])]}")
                 return market
         
-        # 如果精确查找失败，获取最近的市场列表看看
-        print("⚠️ 精确查找失败，查看最近市场...")
+        # 如果精确查找失败，打印最近的5分钟市场看看
+        print("⚠️ 未找到，查看最近的市场...")
         resp = requests.get(gamma_url, params={
             "active": "true",
-            "limit": 10,
-            "order": "startDate",
-            "ascending": "false"
+            "closed": "false",
+            "limit": 20
         })
         
         if resp.status_code == 200:
             markets = resp.json()
-            print(f"📋 最近的市场（前5个）：")
-            for i, m in enumerate(markets[:5]):
-                print(f"   {i+1}. {m.get('slug')}")
+            print("📋 最近活跃市场（前10个）：")
+            for i, m in enumerate(markets[:10]):
+                slug = m.get('slug', '')
+                if f"{duration}m" in slug:
+                    print(f"   {i+1}. {slug}")
         
         return None
         
