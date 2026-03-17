@@ -107,63 +107,60 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    调试版本：直接查看 API 返回的原始数据
+    获取当前或下一个5分钟市场
+    使用 Gamma API 查询（公共数据，无需认证）
+    资产命名：BTC 用 "bitcoin-5m"，ETH 用 "ethereum-5m"
     """
     try:
-        print(f"\n🔍 ===== 开始调试 {asset} 市场查询 =====")
+        now = int(time.time())
+        current_window = (now // 300) * 300
+        window_time = time.strftime('%Y-%m-%dT%H:%M', time.gmtime(current_window))
         
-        # 1. 先试试 Gamma API（官方推荐）
-        gamma_url = "https://gamma-api.polymarket.com/markets"
-        params = {
-            "active": "true",
-            "limit": 5
+        # Polymarket 使用的资产命名
+        asset_map = {
+            "BTC": "bitcoin",
+            "ETH": "ethereum"
         }
-        print(f"📡 请求 Gamma API: {gamma_url}")
-        gamma_resp = requests.get(gamma_url, params=params)
+        asset_name = asset_map.get(asset, asset.lower())
         
-        if gamma_resp.status_code == 200:
-            gamma_data = gamma_resp.json()
-            print(f"✅ Gamma API 返回 {len(gamma_data)} 个市场")
-            if len(gamma_data) > 0:
-                print(f"📋 第一个市场所有字段: {list(gamma_data[0].keys())}")
-                print(f"📋 第一个市场完整数据: {gamma_data[0]}")
-        else:
-            print(f"❌ Gamma API 失败: HTTP {gamma_resp.status_code}")
+        # 构造 slug 格式：asset-5m-时间Z
+        # 例如：bitcoin-5m-2026-03-17T11:00Z
+        slug = f"{asset_name}-{duration}m-{window_time}Z"
         
-        # 2. 试试 CLOB API
-        clob_url = f"{CLOB_API}/markets"
-        print(f"\n📡 请求 CLOB API: {clob_url}")
-        clob_resp = requests.get(clob_url, params={"limit": 5})
+        print(f"🔍 查找市场: {slug}")
         
-        if clob_resp.status_code == 200:
-            clob_data = clob_resp.json()
-            print(f"✅ CLOB API 返回数据类型: {type(clob_data)}")
-            
-            # 处理可能的数据结构
-            if isinstance(clob_data, dict):
-                print(f"📋 CLOB 返回字段: {list(clob_data.keys())}")
-                markets = clob_data.get("data", [])
-            elif isinstance(clob_data, list):
-                markets = clob_data
-            else:
-                markets = []
-            
-            print(f"📊 CLOB 市场数量: {len(markets)}")
-            if len(markets) > 0:
-                first = markets[0]
-                print(f"📋 第一个市场字段: {list(first.keys()) if isinstance(first, dict) else '非字典'}")
-                if isinstance(first, dict):
-                    print(f"📋 市场示例: {first}")
-        else:
-            print(f"❌ CLOB API 失败: HTTP {clob_resp.status_code}")
+        # 使用 Gamma API 查询（公共数据）
+        gamma_url = "https://gamma-api.polymarket.com/markets"
+        resp = requests.get(gamma_url, params={"slug": slug})
         
-        print(f"🔍 ===== 调试结束 =====\n")
+        if resp.status_code == 200:
+            markets = resp.json()
+            if markets and len(markets) > 0:
+                market = markets[0]
+                print(f"✅ 找到市场: {market.get('question')}")
+                print(f"   - 条件ID: {market.get('conditionId')}")
+                print(f"   - 代币ID: {[t.get('id') for t in market.get('tokens', [])]}")
+                return market
         
-        # 临时返回 None，我们先看调试信息
+        # 如果精确查找失败，获取最近的市场列表看看
+        print("⚠️ 精确查找失败，查看最近市场...")
+        resp = requests.get(gamma_url, params={
+            "active": "true",
+            "limit": 10,
+            "order": "startDate",
+            "ascending": "false"
+        })
+        
+        if resp.status_code == 200:
+            markets = resp.json()
+            print(f"📋 最近的市场（前5个）：")
+            for i, m in enumerate(markets[:5]):
+                print(f"   {i+1}. {m.get('slug')}")
+        
         return None
         
     except Exception as e:
-        print(f"❌ 调试过程出错: {e}")
+        print(f"❌ 获取市场失败: {e}")
         return None
 
 def get_token_id(market_info, side):
