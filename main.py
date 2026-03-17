@@ -107,18 +107,81 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    极简调试：直接打印 Gamma API 的原始响应
+    使用 Gamma API 精确查询 5分钟市场
     """
-    import requests
-    url = "https://gamma-api.polymarket.com/markets?limit=1"
-    print(f"\n🔍 调试请求: {url}")
     try:
-        resp = requests.get(url, timeout=10)
-        print(f"📡 状态码: {resp.status_code}")
-        print(f"📡 响应内容 (前500字符):\n{resp.text[:500]}")
+        # 1. 计算当前5分钟窗口的起始时间 (UTC)
+        import time
+        now = int(time.time())
+        window_start = (now // 300) * 300
+        window_time_utc = time.strftime('%Y-%m-%dT%H:%M', time.gmtime(window_start))
+        
+        # 2. 资产名称映射（官方使用全称）
+        asset_map = {
+            "BTC": "bitcoin",
+            "ETH": "ethereum"
+        }
+        asset_name = asset_map.get(asset)
+        if not asset_name:
+            print(f"❌ 不支持的资产: {asset}")
+            return None
+            
+        # 3. 构造精确的 slug
+        exact_slug = f"{asset_name}-{duration}m-{window_time_utc}Z"
+        print(f"🔍 正在精确查询 slug: {exact_slug}")
+        
+        # 4. 使用 Gamma API 的 slug 参数进行查询
+        gamma_url = "https://gamma-api.polymarket.com/markets"
+        params = {
+            "slug": exact_slug
+        }
+        
+        resp = requests.get(gamma_url, params=params, timeout=10)
+        
+        if resp.status_code == 200:
+            markets = resp.json()
+            if markets and len(markets) > 0:
+                market = markets[0]
+                print(f"✅ 市场查找成功！")
+                print(f"   - 问题: {market.get('question')}")
+                print(f"   - 条件ID: {market.get('conditionId')}")
+                # Gamma API 返回的数据格式可能与 CLOB 不同，需要适配
+                # 我们将其转换为与原有代码兼容的格式（包含 tokens 信息）
+                # 注意：Gamma API 可能不直接返回 tokens，可能需要额外查询或调整
+                # 这里先返回原始数据，后续可能需要根据实际结构调整
+                return market
+            else:
+                print(f"⚠️ 未找到 slug 为 {exact_slug} 的市场")
+        else:
+            print(f"❌ API 请求失败，状态码: {resp.status_code}")
+            
+        # 可选：如果精确查询失败，可以尝试查询最近的相关市场作为备用
+        print("⚠️ 尝试查询最近的相关市场...")
+        backup_params = {
+            "active": "true", 
+            "limit": 20,
+            "order": "startDate",
+            "ascending": "false"
+        }
+        backup_resp = requests.get(gamma_url, params=backup_params, timeout=10)
+        if backup_resp.status_code == 200:
+            all_markets = backup_resp.json()
+            keyword = f"{asset_name}-{duration}m"
+            found = []
+            for m in all_markets:
+                slug = m.get('slug', '')
+                if keyword in slug:
+                    found.append(slug)
+            if found:
+                print(f"📋 找到以下相关市场，请检查时间是否正确：")
+                for s in found[:5]:
+                    print(f"   - {s}")
+        
+        return None
+        
     except Exception as e:
-        print(f"❌ 请求异常: {e}")
-    return None  # 始终返回 None，避免影响原有逻辑
+        print(f"❌ 获取市场时发生异常: {e}")
+        return None
 
 def get_token_id(market_info, side):
     try:
