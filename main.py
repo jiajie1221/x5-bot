@@ -107,60 +107,18 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    获取当前或下一个5分钟市场
-    使用 Gamma API 查询（官方推荐，无需认证）
+    极简调试：直接打印 Gamma API 的原始响应
     """
+    import requests
+    url = "https://gamma-api.polymarket.com/markets?limit=1"
+    print(f"\n🔍 调试请求: {url}")
     try:
-        # 当前时间窗口
-        now = int(time.time())
-        current_window = (now // 300) * 300
-        window_time = time.strftime('%Y-%m-%dT%H:%M', time.gmtime(current_window))
-        
-        # 资产名称映射：官方用的是全称
-        asset_map = {
-            "BTC": "bitcoin",
-            "ETH": "ethereum"
-        }
-        asset_name = asset_map.get(asset, asset.lower())
-        
-        # 构造官方slug格式
-        slug = f"{asset_name}-{duration}m-{window_time}Z"
-        print(f"🔍 查找市场: {slug}")
-        
-        # Gamma API 查询（官方文档明确支持slug参数）
-        gamma_url = "https://gamma-api.polymarket.com/markets"
-        resp = requests.get(gamma_url, params={"slug": slug})
-        
-        if resp.status_code == 200:
-            markets = resp.json()
-            if markets and len(markets) > 0:
-                market = markets[0]
-                print(f"✅ 找到市场: {market.get('slug')}")
-                print(f"   - 问题: {market.get('question')}")
-                print(f"   - 条件ID: {market.get('conditionId')}")
-                return market
-        
-        # 如果精确查找失败，打印最近的5分钟市场看看
-        print("⚠️ 未找到，查看最近的市场...")
-        resp = requests.get(gamma_url, params={
-            "active": "true",
-            "closed": "false",
-            "limit": 20
-        })
-        
-        if resp.status_code == 200:
-            markets = resp.json()
-            print("📋 最近活跃市场（前10个）：")
-            for i, m in enumerate(markets[:10]):
-                slug = m.get('slug', '')
-                if f"{duration}m" in slug:
-                    print(f"   {i+1}. {slug}")
-        
-        return None
-        
+        resp = requests.get(url, timeout=10)
+        print(f"📡 状态码: {resp.status_code}")
+        print(f"📡 响应内容 (前500字符):\n{resp.text[:500]}")
     except Exception as e:
-        print(f"❌ 获取市场失败: {e}")
-        return None
+        print(f"❌ 请求异常: {e}")
+    return None  # 始终返回 None，避免影响原有逻辑
 
 def get_token_id(market_info, side):
     try:
