@@ -107,58 +107,63 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    获取当前或下一个5分钟市场（基于官方文档）
+    调试版本：直接查看 API 返回的原始数据
     """
     try:
-        # 方法1：用 Gamma API 获取活跃事件（推荐）
+        print(f"\n🔍 ===== 开始调试 {asset} 市场查询 =====")
+        
+        # 1. 先试试 Gamma API（官方推荐）
         gamma_url = "https://gamma-api.polymarket.com/markets"
         params = {
             "active": "true",
-            "closed": "false",
-            "limit": 50,
-            "order": "start_date",
-            "ascending": "true"
+            "limit": 5
         }
+        print(f"📡 请求 Gamma API: {gamma_url}")
+        gamma_resp = requests.get(gamma_url, params=params)
         
-        print(f"🔍 查询 Gamma API: {gamma_url}")
-        resp = requests.get(gamma_url, params=params)
+        if gamma_resp.status_code == 200:
+            gamma_data = gamma_resp.json()
+            print(f"✅ Gamma API 返回 {len(gamma_data)} 个市场")
+            if len(gamma_data) > 0:
+                print(f"📋 第一个市场所有字段: {list(gamma_data[0].keys())}")
+                print(f"📋 第一个市场完整数据: {gamma_data[0]}")
+        else:
+            print(f"❌ Gamma API 失败: HTTP {gamma_resp.status_code}")
         
-        if resp.status_code == 200:
-            markets = resp.json()
-            print(f"📊 Gamma API 返回 {len(markets)} 个市场")
-            
-            # 打印第一个市场的所有字段，看看结构
-            if markets and len(markets) > 0:
-                first = markets[0]
-                print(f"📋 市场字段: {list(first.keys())}")
-                print(f"📋 示例市场 slug: {first.get('slug')}")
-                
-                # 筛选5分钟市场
-                keyword = f"{asset.lower()}-{duration}m"
-                for m in markets:
-                    slug = m.get('slug', '')
-                    if keyword in slug:
-                        print(f"✅ 找到匹配市场: {slug}")
-                        return m
-        
-        # 方法2：用 CLOB API 直接查市场详情
+        # 2. 试试 CLOB API
         clob_url = f"{CLOB_API}/markets"
-        print(f"🔍 查询 CLOB API: {clob_url}")
-        resp = requests.get(clob_url, params={"limit": 50})
+        print(f"\n📡 请求 CLOB API: {clob_url}")
+        clob_resp = requests.get(clob_url, params={"limit": 5})
         
-        if resp.status_code == 200:
-            data = resp.json()
-            # CLOB API 返回的可能是 { "data": [...] } 结构
-            markets = data.get("data", []) if isinstance(data, dict) else data
+        if clob_resp.status_code == 200:
+            clob_data = clob_resp.json()
+            print(f"✅ CLOB API 返回数据类型: {type(clob_data)}")
             
-            if markets and len(markets) > 0:
+            # 处理可能的数据结构
+            if isinstance(clob_data, dict):
+                print(f"📋 CLOB 返回字段: {list(clob_data.keys())}")
+                markets = clob_data.get("data", [])
+            elif isinstance(clob_data, list):
+                markets = clob_data
+            else:
+                markets = []
+            
+            print(f"📊 CLOB 市场数量: {len(markets)}")
+            if len(markets) > 0:
                 first = markets[0]
-                print(f"📋 CLOB 市场字段: {list(first.keys()) if isinstance(first, dict) else '非字典'}")
+                print(f"📋 第一个市场字段: {list(first.keys()) if isinstance(first, dict) else '非字典'}")
+                if isinstance(first, dict):
+                    print(f"📋 市场示例: {first}")
+        else:
+            print(f"❌ CLOB API 失败: HTTP {clob_resp.status_code}")
         
+        print(f"🔍 ===== 调试结束 =====\n")
+        
+        # 临时返回 None，我们先看调试信息
         return None
         
     except Exception as e:
-        print(f"❌ 获取市场失败: {e}")
+        print(f"❌ 调试过程出错: {e}")
         return None
 
 def get_token_id(market_info, side):
