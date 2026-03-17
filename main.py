@@ -107,61 +107,54 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    获取当前或下一个5分钟市场（改进版，支持多种命名）
+    获取当前或下一个5分钟市场（基于官方文档）
     """
     try:
-        # ==== 调试：看看API返回的市场 ====
-        debug_resp = requests.get(f"{CLOB_API}/markets", params={"limit": 50})
-        if debug_resp.status_code == 200:
-            debug_data = debug_resp.json()
-            print("📋 最近的市场列表（前15个）：")
-            for i, m in enumerate(debug_data.get("data", [])[:15]):
-                print(f"  {i+1}. {m.get('slug')}")
-        # ==== 调试结束 ====
+        # 方法1：用 Gamma API 获取活跃事件（推荐）
+        gamma_url = "https://gamma-api.polymarket.com/markets"
+        params = {
+            "active": "true",
+            "closed": "false",
+            "limit": 50,
+            "order": "start_date",
+            "ascending": "true"
+        }
         
-        now = int(time.time())
-        current_window_start = (now // 300) * 300
+        print(f"🔍 查询 Gamma API: {gamma_url}")
+        resp = requests.get(gamma_url, params=params)
         
-        print(f"🔍 当前时间戳: {now}, 当前窗口开始: {current_window_start}")
-        print(f"🕒 当前窗口时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(current_window_start))}")
+        if resp.status_code == 200:
+            markets = resp.json()
+            print(f"📊 Gamma API 返回 {len(markets)} 个市场")
+            
+            # 打印第一个市场的所有字段，看看结构
+            if markets and len(markets) > 0:
+                first = markets[0]
+                print(f"📋 市场字段: {list(first.keys())}")
+                print(f"📋 示例市场 slug: {first.get('slug')}")
+                
+                # 筛选5分钟市场
+                keyword = f"{asset.lower()}-{duration}m"
+                for m in markets:
+                    slug = m.get('slug', '')
+                    if keyword in slug:
+                        print(f"✅ 找到匹配市场: {slug}")
+                        return m
         
-        # 尝试多种可能的资产名称
-        possible_names = [asset.lower()]
-        if asset == "ETH":
-            possible_names.append("ethereum")
-        elif asset == "BTC":
-            possible_names.append("bitcoin")
-        
-        print(f"🔎 尝试搜索名称: {possible_names}")
-        
-        # 获取最近的市场列表
-        resp = requests.get(
-            f"{CLOB_API}/markets",
-            params={"limit": 200}
-        )
+        # 方法2：用 CLOB API 直接查市场详情
+        clob_url = f"{CLOB_API}/markets"
+        print(f"🔍 查询 CLOB API: {clob_url}")
+        resp = requests.get(clob_url, params={"limit": 50})
         
         if resp.status_code == 200:
             data = resp.json()
-            markets = data.get("data", [])
+            # CLOB API 返回的可能是 { "data": [...] } 结构
+            markets = data.get("data", []) if isinstance(data, dict) else data
             
-            matching_markets = []
-            
-            for m in markets:
-                slug = m.get("slug", "").lower()
-                for name in possible_names:
-                    if name in slug and f"{duration}m" in slug:
-                        matching_markets.append(m)
-                        print(f"📌 找到匹配市场: {slug}")
-                        break
-            
-            if matching_markets:
-                # 按slug排序（最新的在前）
-                matching_markets.sort(key=lambda x: x.get('slug', ''), reverse=True)
-                latest = matching_markets[0]
-                print(f"✅ 使用市场: {latest.get('slug')}")
-                return latest
+            if markets and len(markets) > 0:
+                first = markets[0]
+                print(f"📋 CLOB 市场字段: {list(first.keys()) if isinstance(first, dict) else '非字典'}")
         
-        print(f"❌ 未找到任何 {asset} 的 {duration}分钟市场")
         return None
         
     except Exception as e:
