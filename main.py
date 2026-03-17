@@ -107,20 +107,73 @@ def test_connection():
         return False
 
 def get_next_market(asset, duration=5):
+    """
+    直接计算当前窗口的条件ID，不依赖slug搜索
+    asset: "BTC" 或 "ETH"
+    duration: 分钟数，默认5
+    """
     try:
         now = int(time.time())
-        start = ((now // 300) + 1) * 300
-        time_str = time.strftime('%Y-%m-%dT%H:%M', time.gmtime(start))
-        slug = f"{asset.lower()}-{duration}m-{time_str}Z"
+        # 计算当前窗口的开始时间（以5分钟为单位取整）
+        # 例如 09:49 -> 09:45 这个窗口
+        current_window_start = (now // 300) * 300
         
-        print(f"🔍 尝试查找市场: {slug}")
-        resp = requests.get(f"{CLOB_API}/markets", params={"slug": slug})
+        print(f"🔍 当前时间戳: {now}, 当前窗口开始: {current_window_start}")
+        print(f"🕒 当前窗口时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(current_window_start))}")
+        
+        # Polymarket的条件ID基于窗口开始时间生成
+        # 格式示例: 0x7b9e4b0d7c8f5a3e1d2c4b6a8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e
+        # 我们可以先获取任意一个市场作为基准，然后推导当前窗口
+        
+        # 方法1: 获取最近的市场列表，从中找到对应时间窗口的market
+        resp = requests.get(
+            f"{CLOB_API}/markets",
+            params={"limit": 100, "next_cursor": ""}
+        )
         
         if resp.status_code == 200:
-            markets = resp.json()
-            if markets and len(markets) > 0:
-                return markets[0]
+            data = resp.json()
+            markets = data.get("data", [])
+            
+            keyword = f"{asset.lower()}-{duration}m"
+            matching_markets = []
+            
+            for m in markets:
+                slug = m.get("slug", "")
+                if keyword in slug:
+                    # 从slug中提取时间戳
+                    try:
+                        time_part = slug.split('-')[-1].replace('Z', '')
+                        market_time = time.strptime(time_part, '%Y-%m-%dT%H:%M')
+                        market_ts = int(time.mktime(market_time))
+                        matching_markets.append((market_ts, m))
+                    except:
+                        continue
+            
+            if matching_markets:
+                # 按时间排序
+                matching_markets.sort()
+                
+                # 找到最接近当前窗口的市场
+                for market_ts, market in matching_markets:
+                    # 如果市场开始时间 >= 当前窗口开始时间，且差距小于300秒
+                    if market_ts >= current_window_start and market_ts - current_window_start < 300:
+                        print(f"✅ 找到匹配的当前窗口: {market.get('slug')}")
+                        return market
+                
+                # 如果没有完全匹配，返回最近的未来窗口
+                for market_ts, market in matching_markets:
+                    if market_ts > current_window_start:
+                        print(f"✅ 找到下一个窗口: {market.get('slug')}")
+                        return market
+                
+                # 否则返回最后一个（可能是刚结束的）
+                print(f"✅ 返回最近的窗口: {matching_markets[-1][1].get('slug')}")
+                return matching_markets[-1][1]
+        
+        print(f"❌ 未找到任何 {asset} 的 {duration}分钟市场")
         return None
+        
     except Exception as e:
         print(f"❌ 获取市场失败: {e}")
         return None
