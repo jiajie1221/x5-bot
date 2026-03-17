@@ -218,13 +218,12 @@ def calculate_bet_amount(initial_bet, stage):
     return 0
 
 def get_asset_from_market(market):
-    """从市场名称获取资产类型（处理不同命名）"""
+    """从市场名称获取资产类型"""
     if market == "BTC-5M":
         return "BTC"
     elif market == "ETH-5M":
-        return "ETH"  # 先保持 ETH，让调试代码告诉我们正确命名
-    else:
-        return market.split('-')[0]
+        return "ETH"
+    return market.split('-')[0]
 
 def get_direction_from_action(action):
     return "UP" if action == "UP" else "DOWN"
