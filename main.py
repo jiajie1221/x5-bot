@@ -215,56 +215,37 @@ def get_next_market(asset, duration=5):
 def get_token_id(market_info, side):
     """
     从 Gamma API 返回的市场数据中提取 token ID。
-    调试版本：打印 market_info 中 tokens 字段的详细结构。
+    实际字段：
+        outcomes: ["Yes", "No"] 或 ["Up", "Down"]
+        clobTokenIds: [token_id_yes, token_id_no]
     """
     try:
-        print("\n🔍 [get_token_id 调试] 开始提取 token ID")
-        print(f"market_info 的 keys: {list(market_info.keys())}")
+        outcomes = market_info.get('outcomes')
+        clob_token_ids = market_info.get('clobTokenIds')
         
-        # 获取 tokens 字段
-        tokens = market_info.get('tokens')
-        print(f"tokens 字段类型: {type(tokens)}")
-        
-        if tokens is None:
-            print("❌ tokens 字段不存在")
+        if not outcomes or not clob_token_ids:
+            print("❌ 缺少 outcomes 或 clobTokenIds 字段")
             return None
-            
-        if isinstance(tokens, list):
-            print(f"tokens 列表长度: {len(tokens)}")
-            for i, token in enumerate(tokens):
-                print(f"token[{i}] 类型: {type(token)}")
-                if isinstance(token, dict):
-                    print(f"token[{i}] 的 keys: {list(token.keys())}")
-                    print(f"token[{i}] 的部分内容: id={token.get('id')}, outcome={token.get('outcome')}")
-                else:
-                    print(f"token[{i}] 不是字典，而是: {token}")
-        else:
-            print(f"tokens 不是列表，而是: {tokens}")
-            # 如果 tokens 是其他结构，尝试直接返回
-            if isinstance(tokens, dict) and tokens.get('id'):
-                return tokens.get('id')
         
-        # 尝试多种方式提取 ID
-        # 方式1：如果 tokens 是列表，尝试按 outcome 匹配
-        if isinstance(tokens, list) and len(tokens) >= 2:
-            # 尝试匹配 outcome
-            for token in tokens:
-                if isinstance(token, dict):
-                    outcome = token.get('outcome', '').lower()
-                    token_id = token.get('id')
-                    if side == "UP" and outcome == "yes":
-                        return token_id
-                    elif side == "DOWN" and outcome == "no":
-                        return token_id
-            
-            # 如果没匹配到，按顺序：第一个是 Yes，第二个是 No
-            if side == "UP":
-                return tokens[0].get('id') if isinstance(tokens[0], dict) else None
-            else:
-                return tokens[1].get('id') if isinstance(tokens[1], dict) else None
+        if len(clob_token_ids) < 2:
+            print("❌ clobTokenIds 长度不足")
+            return None
         
-        print("❌ 无法从 tokens 中提取 ID")
-        return None
+        # 打印调试信息
+        print(f"📋 outcomes: {outcomes}")
+        print(f"📋 clobTokenIds: {clob_token_ids}")
+        
+        # 匹配 side
+        for i, outcome in enumerate(outcomes):
+            outcome_lower = outcome.lower()
+            if side == "UP" and outcome_lower in ("yes", "up"):
+                return clob_token_ids[i]
+            if side == "DOWN" and outcome_lower in ("no", "down"):
+                return clob_token_ids[i]
+        
+        # 降级方案：假设第一个是 Yes/Up，第二个是 No/Down
+        print("⚠️ 未通过 outcome 匹配，使用默认顺序")
+        return clob_token_ids[0] if side == "UP" else clob_token_ids[1]
         
     except Exception as e:
         print(f"❌ get_token_id 异常: {e}")
