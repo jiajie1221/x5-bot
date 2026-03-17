@@ -107,24 +107,23 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    从 Gamma API 获取下一个即将开始的 5 分钟市场。
-    精确筛选：slug 必须包含资产名和 "-5m-"（避免误匹配 15m 等）。
+    获取下一个5分钟市场，基于 Gamma API 返回的真实 slug 格式。
+    真实 slug 格式示例：eth-updown-5m-1773834600
     """
     try:
         import time
         from datetime import datetime
-        
-        # 资产名称映射（官方使用全称）
+
+        # 资产名称映射：实际slug中用的是小写简称，如 eth, btc
         asset_map = {
-            "BTC": "bitcoin",
-            "ETH": "ethereum"
+            "BTC": "btc",
+            "ETH": "eth"
         }
-        asset_name = asset_map.get(asset)
-        if not asset_name:
+        asset_short = asset_map.get(asset)
+        if not asset_short:
             print(f"❌ 不支持的资产: {asset}")
             return None
-        
-        # Gamma API 端点
+
         gamma_url = "https://gamma-api.polymarket.com/markets"
         params = {
             "active": "true",
@@ -134,73 +133,68 @@ def get_next_market(asset, duration=5):
             "ascending": "false",
             "tag": "crypto"
         }
-        
+
         print(f"\n🔍 正在从 Gamma API 拉取加密货币市场...")
         resp = requests.get(gamma_url, params=params, timeout=15)
-        
+
         if resp.status_code != 200:
             print(f"❌ Gamma API 请求失败，状态码: {resp.status_code}")
             return None
-        
+
         markets = resp.json()
         print(f"📊 Gamma API 返回 {len(markets)} 个活跃市场")
-        
-        # 精确筛选：必须包含资产名和 "-5m-"，避免匹配到 15m、30m 等
-        pattern = f"{asset_name}-5m-"  # 如 "ethereum-5m-"
+
+        # 构造匹配模式：如 "eth-updown-5m-"
+        pattern = f"{asset_short}-updown-{duration}m-"
         five_min_markets = []
+
         for m in markets:
             slug = m.get('slug', '')
-            question = m.get('question', '')
             if pattern in slug:
-                # 提取开始时间戳（从 slug 或 startDate）
+                # 提取时间戳（slug 末尾部分）
                 try:
-                    # slug 格式如 "ethereum-5m-2026-03-17T12:00Z"
-                    time_part = slug.split('-')[-1].replace('Z', '')
-                    start_time = datetime.strptime(time_part, '%Y-%m-%dT%H:%M')
-                    start_ts = int(start_time.timestamp())
+                    ts_str = slug.split('-')[-1]
+                    start_ts = int(ts_str)
                 except:
+                    # 如果提取失败，使用 startDate 字段
                     start_date = m.get('startDate')
                     if start_date:
                         start_ts = int(datetime.fromisoformat(start_date.replace('Z', '+00:00')).timestamp())
                     else:
                         start_ts = 0
-                
+
                 five_min_markets.append({
                     'slug': slug,
-                    'question': question,
+                    'question': m.get('question'),
                     'conditionId': m.get('conditionId'),
                     'tokens': m.get('tokens', []),
                     'start_ts': start_ts,
                     'market': m
                 })
-        
-        print(f"📋 找到 {len(five_min_markets)} 个符合 {asset}-5m 格式的市场")
-        
+
+        print(f"📋 找到 {len(five_min_markets)} 个符合 {pattern} 格式的市场")
+
         if not five_min_markets:
-            # 调试：打印所有包含 "5m" 的 slug，看看是什么格式
-            print("📋 所有包含 '5m' 的 slug：")
-            all_five_min = [m.get('slug') for m in markets if '5m' in m.get('slug', '')]
-            for slug in all_five_min[:20]:
-                print(f"   - {slug}")
+            print("❌ 未找到任何匹配的市场")
             return None
-        
-        # 按开始时间升序排序（最早的在前）
+
+        # 按开始时间升序排序
         five_min_markets.sort(key=lambda x: x['start_ts'])
-        
-        # 当前时间戳
+
         now_ts = int(time.time())
-        
-        # 寻找下一个即将开始的窗口（start_ts > now_ts）
         next_market = None
+
+        # 寻找下一个未来窗口（start_ts > now_ts）
         for m in five_min_markets:
             if m['start_ts'] > now_ts:
                 next_market = m
                 break
-        
+
         if not next_market and five_min_markets:
-            next_market = five_min_markets[-1]  # 取最后一个（可能正在进行）
+            # 如果没有未来的，取最后一个（可能正在进行）
+            next_market = five_min_markets[-1]
             print("⚠️ 未找到未来的市场，使用最后一个（可能正在进行）")
-        
+
         if next_market:
             print(f"✅ 选择市场: {next_market['slug']}")
             print(f"   - 问题: {next_market['question']}")
@@ -211,7 +205,7 @@ def get_next_market(asset, duration=5):
         else:
             print("❌ 无法选择合适的市场")
             return None
-            
+
     except Exception as e:
         print(f"❌ 获取市场时发生异常: {e}")
         import traceback
