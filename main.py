@@ -107,16 +107,15 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    使用 Gamma API 精确查询 5分钟市场
+    获取当前或下一个5分钟市场
+    基于官方文档的正确实现：用 Gamma API 获取所有活跃的加密货币 5分钟市场，
+    按开始时间排序，选择下一个即将开始的窗口。
     """
     try:
-        # 1. 计算当前5分钟窗口的起始时间 (UTC)
         import time
-        now = int(time.time())
-        window_start = (now // 300) * 300
-        window_time_utc = time.strftime('%Y-%m-%dT%H:%M', time.gmtime(window_start))
+        from datetime import datetime
         
-        # 2. 资产名称映射（官方使用全称）
+        # 资产名称映射（官方使用全称）[citation:1]
         asset_map = {
             "BTC": "bitcoin",
             "ETH": "ethereum"
@@ -126,61 +125,104 @@ def get_next_market(asset, duration=5):
             print(f"❌ 不支持的资产: {asset}")
             return None
             
-        # 3. 构造精确的 slug
-        exact_slug = f"{asset_name}-{duration}m-{window_time_utc}Z"
-        print(f"🔍 正在精确查询 slug: {exact_slug}")
-        
-        # 4. 使用 Gamma API 的 slug 参数进行查询
+        # Gamma API 端点（市场发现专用，无需认证）[citation:4]
         gamma_url = "https://gamma-api.polymarket.com/markets"
         params = {
-            "slug": exact_slug
+            "active": "true",           # 只获取活跃市场 [citation:1]
+            "closed": "false",           # 不包含已关闭的
+            "limit": 200,                 # 获取足够多的市场
+            "order": "startDate",         # 按开始时间排序
+            "ascending": "false",         # 最新的在前
+            "tag": "crypto"               # 加密货币分类 [citation:4]
         }
         
-        resp = requests.get(gamma_url, params=params, timeout=10)
+        print(f"\n🔍 正在从 Gamma API 拉取加密货币市场...")
+        resp = requests.get(gamma_url, params=params, timeout=15)
         
-        if resp.status_code == 200:
-            markets = resp.json()
-            if markets and len(markets) > 0:
-                market = markets[0]
-                print(f"✅ 市场查找成功！")
-                print(f"   - 问题: {market.get('question')}")
-                print(f"   - 条件ID: {market.get('conditionId')}")
-                # Gamma API 返回的数据格式可能与 CLOB 不同，需要适配
-                # 我们将其转换为与原有代码兼容的格式（包含 tokens 信息）
-                # 注意：Gamma API 可能不直接返回 tokens，可能需要额外查询或调整
-                # 这里先返回原始数据，后续可能需要根据实际结构调整
-                return market
-            else:
-                print(f"⚠️ 未找到 slug 为 {exact_slug} 的市场")
-        else:
-            print(f"❌ API 请求失败，状态码: {resp.status_code}")
+        if resp.status_code != 200:
+            print(f"❌ Gamma API 请求失败，状态码: {resp.status_code}")
+            print(f"响应内容: {resp.text[:200]}")
+            return None
             
-        # 可选：如果精确查询失败，可以尝试查询最近的相关市场作为备用
-        print("⚠️ 尝试查询最近的相关市场...")
-        backup_params = {
-            "active": "true", 
-            "limit": 20,
-            "order": "startDate",
-            "ascending": "false"
-        }
-        backup_resp = requests.get(gamma_url, params=backup_params, timeout=10)
-        if backup_resp.status_code == 200:
-            all_markets = backup_resp.json()
-            keyword = f"{asset_name}-{duration}m"
-            found = []
-            for m in all_markets:
+        markets = resp.json()
+        print(f"📊 Gamma API 返回 {len(markets)} 个活跃市场")
+        
+        # 筛选出所有 5分钟市场
+        five_min_markets = []
+        for m in markets:
+            slug = m.get('slug', '')
+            question = m.get('question', '')
+            # 检查是否包含资产名和 5m 标识
+            if (asset_name in slug or asset_name in question.lower()) and ('5m' in slug or '5min' in slug):
+                # 从 slug 中提取开始时间（格式如 bitcoin-5m-2026-03-17T12:00Z）[citation:4]
+                try:
+                    time_part = slug.split('-')[-1].replace('Z', '')
+                    start_time = datetime.strptime(time_part, '%Y-%m-%dT%H:%M')
+                    start_ts = int(start_time.timestamp())
+                except:
+                    # 如果无法解析，使用 startDate 字段
+                    start_date = m.get('startDate', 0)
+                    if isinstance(start_date, str):
+                        start_ts = int(datetime.fromisoformat(start_date.replace('Z', '+00:00')).timestamp())
+                    else:
+                        start_ts = 0
+                
+                five_min_markets.append({
+                    'slug': slug,
+                    'question': question,
+                    'conditionId': m.get('conditionId'),
+                    'tokens': m.get('tokens', []),
+                    'start_ts': start_ts,
+                    'market': m   # 保存原始数据
+                })
+        
+        print(f"📋 找到 {len(five_min_markets)} 个 {asset} 的 5分钟市场")
+        
+        if not five_min_markets:
+            # 调试：打印所有 5分钟市场（不限资产）
+            print("📋 所有 5分钟市场（不限资产）：")
+            all_five_min = []
+            for m in markets:
                 slug = m.get('slug', '')
-                if keyword in slug:
-                    found.append(slug)
-            if found:
-                print(f"📋 找到以下相关市场，请检查时间是否正确：")
-                for s in found[:5]:
-                    print(f"   - {s}")
+                if '5m' in slug or '5min' in slug:
+                    all_five_min.append(slug)
+            for slug in all_five_min[:20]:
+                print(f"   - {slug}")
+            return None
+            
+        # 按开始时间排序（升序，最早的在前）
+        five_min_markets.sort(key=lambda x: x['start_ts'])
         
-        return None
+        # 当前时间戳
+        now_ts = int(time.time())
         
+        # 寻找下一个即将开始的窗口（开始时间 > now_ts）
+        next_market = None
+        for m in five_min_markets:
+            if m['start_ts'] > now_ts:
+                next_market = m
+                break
+        
+        # 如果没有未来的窗口，取最后一个（可能是正在进行的）
+        if not next_market and five_min_markets:
+            next_market = five_min_markets[-1]
+            print("⚠️ 未找到未来的市场，使用最后一个（可能正在进行）")
+        
+        if next_market:
+            print(f"✅ 选择市场: {next_market['slug']}")
+            print(f"   - 问题: {next_market['question']}")
+            print(f"   - 条件ID: {next_market['conditionId']}")
+            start_time_str = datetime.fromtimestamp(next_market['start_ts']).strftime('%Y-%m-%d %H:%M:%S')
+            print(f"   - 开始时间: {start_time_str} UTC")
+            return next_market['market']
+        else:
+            print("❌ 无法选择合适的市场")
+            return None
+            
     except Exception as e:
         print(f"❌ 获取市场时发生异常: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_token_id(market_info, side):
