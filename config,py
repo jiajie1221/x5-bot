@@ -1,0 +1,13 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+PRIVATE_KEY = os.getenv("POLYGON_PRIVATE_KEY")
+RPC_URL = os.getenv("POLYGON_RPC_URL")
+INITIAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL", 100))
+BASE_BET_PERCENT = float(os.getenv("BASE_BET_PERCENT", 0.02))
+MAX_STAGES = int(os.getenv("MAX_STAGES", 3))
+TARGET_PRICE = float(os.getenv("TARGET_PRICE", 0.5))
+PRICE_TOLERANCE = float(os.getenv("PRICE_TOLERANCE", 0.025))
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
