@@ -107,15 +107,14 @@ def test_connection():
 
 def get_next_market(asset, duration=5):
     """
-    获取当前或下一个5分钟市场
-    基于官方文档的正确实现：用 Gamma API 获取所有活跃的加密货币 5分钟市场，
-    按开始时间排序，选择下一个即将开始的窗口。
+    从 Gamma API 获取下一个即将开始的 5 分钟市场。
+    精确筛选：slug 必须包含资产名和 "-5m-"（避免误匹配 15m 等）。
     """
     try:
         import time
         from datetime import datetime
         
-        # 资产名称映射（官方使用全称）[citation:1]
+        # 资产名称映射（官方使用全称）
         asset_map = {
             "BTC": "bitcoin",
             "ETH": "ethereum"
@@ -124,16 +123,16 @@ def get_next_market(asset, duration=5):
         if not asset_name:
             print(f"❌ 不支持的资产: {asset}")
             return None
-            
-        # Gamma API 端点（市场发现专用，无需认证）[citation:4]
+        
+        # Gamma API 端点
         gamma_url = "https://gamma-api.polymarket.com/markets"
         params = {
-            "active": "true",           # 只获取活跃市场 [citation:1]
-            "closed": "false",           # 不包含已关闭的
-            "limit": 200,                 # 获取足够多的市场
-            "order": "startDate",         # 按开始时间排序
-            "ascending": "false",         # 最新的在前
-            "tag": "crypto"               # 加密货币分类 [citation:4]
+            "active": "true",
+            "closed": "false",
+            "limit": 200,
+            "order": "startDate",
+            "ascending": "false",
+            "tag": "crypto"
         }
         
         print(f"\n🔍 正在从 Gamma API 拉取加密货币市场...")
@@ -141,28 +140,27 @@ def get_next_market(asset, duration=5):
         
         if resp.status_code != 200:
             print(f"❌ Gamma API 请求失败，状态码: {resp.status_code}")
-            print(f"响应内容: {resp.text[:200]}")
             return None
-            
+        
         markets = resp.json()
         print(f"📊 Gamma API 返回 {len(markets)} 个活跃市场")
         
-        # 筛选出所有 5分钟市场
+        # 精确筛选：必须包含资产名和 "-5m-"，避免匹配到 15m、30m 等
+        pattern = f"{asset_name}-5m-"  # 如 "ethereum-5m-"
         five_min_markets = []
         for m in markets:
             slug = m.get('slug', '')
             question = m.get('question', '')
-            # 检查是否包含资产名和 5m 标识
-            if (asset_name in slug or asset_name in question.lower()) and ('5m' in slug or '5min' in slug):
-                # 从 slug 中提取开始时间（格式如 bitcoin-5m-2026-03-17T12:00Z）[citation:4]
+            if pattern in slug:
+                # 提取开始时间戳（从 slug 或 startDate）
                 try:
+                    # slug 格式如 "ethereum-5m-2026-03-17T12:00Z"
                     time_part = slug.split('-')[-1].replace('Z', '')
                     start_time = datetime.strptime(time_part, '%Y-%m-%dT%H:%M')
                     start_ts = int(start_time.timestamp())
                 except:
-                    # 如果无法解析，使用 startDate 字段
-                    start_date = m.get('startDate', 0)
-                    if isinstance(start_date, str):
+                    start_date = m.get('startDate')
+                    if start_date:
                         start_ts = int(datetime.fromisoformat(start_date.replace('Z', '+00:00')).timestamp())
                     else:
                         start_ts = 0
@@ -173,39 +171,34 @@ def get_next_market(asset, duration=5):
                     'conditionId': m.get('conditionId'),
                     'tokens': m.get('tokens', []),
                     'start_ts': start_ts,
-                    'market': m   # 保存原始数据
+                    'market': m
                 })
         
-        print(f"📋 找到 {len(five_min_markets)} 个 {asset} 的 5分钟市场")
+        print(f"📋 找到 {len(five_min_markets)} 个符合 {asset}-5m 格式的市场")
         
         if not five_min_markets:
-            # 调试：打印所有 5分钟市场（不限资产）
-            print("📋 所有 5分钟市场（不限资产）：")
-            all_five_min = []
-            for m in markets:
-                slug = m.get('slug', '')
-                if '5m' in slug or '5min' in slug:
-                    all_five_min.append(slug)
+            # 调试：打印所有包含 "5m" 的 slug，看看是什么格式
+            print("📋 所有包含 '5m' 的 slug：")
+            all_five_min = [m.get('slug') for m in markets if '5m' in m.get('slug', '')]
             for slug in all_five_min[:20]:
                 print(f"   - {slug}")
             return None
-            
-        # 按开始时间排序（升序，最早的在前）
+        
+        # 按开始时间升序排序（最早的在前）
         five_min_markets.sort(key=lambda x: x['start_ts'])
         
         # 当前时间戳
         now_ts = int(time.time())
         
-        # 寻找下一个即将开始的窗口（开始时间 > now_ts）
+        # 寻找下一个即将开始的窗口（start_ts > now_ts）
         next_market = None
         for m in five_min_markets:
             if m['start_ts'] > now_ts:
                 next_market = m
                 break
         
-        # 如果没有未来的窗口，取最后一个（可能是正在进行的）
         if not next_market and five_min_markets:
-            next_market = five_min_markets[-1]
+            next_market = five_min_markets[-1]  # 取最后一个（可能正在进行）
             print("⚠️ 未找到未来的市场，使用最后一个（可能正在进行）")
         
         if next_market:
@@ -226,14 +219,32 @@ def get_next_market(asset, duration=5):
         return None
 
 def get_token_id(market_info, side):
+    """
+    从 Gamma API 返回的市场数据中提取 token ID。
+    side: "UP" 或 "DOWN"
+    """
     try:
-        tokens = market_info.get("tokens", [])
+        tokens = market_info.get('tokens', [])
         if not tokens or len(tokens) < 2:
+            print("⚠️ 市场没有足够的 token")
             return None
+        
+        # Gamma API 返回的 tokens 通常是一个列表，每个 token 有 id 和 outcome
+        # 按 outcome 匹配 "Yes" 或 "No"
+        for token in tokens:
+            outcome = token.get('outcome', '').lower()
+            token_id = token.get('id')
+            if side == "UP" and outcome == "yes":
+                return token_id
+            elif side == "DOWN" and outcome == "no":
+                return token_id
+        
+        # 如果没匹配到，尝试按顺序：第一个是 Yes，第二个是 No（常见惯例）
         if side == "UP":
-            return tokens[0].get("token_id")
+            return tokens[0].get('id')
         else:
-            return tokens[1].get("token_id")
+            return tokens[1].get('id')
+            
     except Exception as e:
         print(f"❌ 获取 token ID 失败: {e}")
         return None
